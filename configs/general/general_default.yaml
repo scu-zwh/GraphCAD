@@ -1,5 +1,5 @@
 # General settings
-name: 'ConGress_CAD'      # Warning: 'debug' and 'test' are reserved name that have a special behavior
+name: 'DiGress_CAD'      # Warning: 'debug' and 'test' are reserved name that have a special behavior
 
 wandb: 'online'             # online | offline | disabled
 gpus: 1                     # Multi-gpu is not implemented on this branch
@@ -20,8 +20,8 @@ number_chain_steps: 50        # Number of frames in each gif
 # final_model_samples_to_generate: 1000
 # final_model_samples_to_save: 20
 # final_model_chains_to_save: 10
-final_model_samples_to_generate: 3
-final_model_samples_to_save: 2
-final_model_chains_to_save: 1
+final_model_samples_to_generate: 256
+final_model_samples_to_save: 20
+final_model_chains_to_save: 10
 
 evaluate_all_checkpoints: False

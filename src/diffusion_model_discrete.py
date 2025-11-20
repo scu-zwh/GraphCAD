@@ -281,7 +281,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         id = 0
         while samples_left_to_generate > 0:
             self.print(f'Samples left to generate: {samples_left_to_generate}/'
-                       f'{self.cfg.general.final_model_samples_to_generate}', end='', flush=True)
+                       f'{self.cfg.general.final_model_samples_to_generate}', end='')
             bs = 2 * self.cfg.train.batch_size
             to_generate = min(samples_left_to_generate, bs)
             to_save = min(samples_left_to_save, bs)
@@ -314,7 +314,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     f.write("\n")
                 f.write("\n")
         self.print("Generated graphs Saved. Computing sampling metrics...")
-        self.sampling_metrics(samples, self.name, self.current_epoch, self.val_counter, test=True, local_rank=self.local_rank)
+        self.sampling_metrics(samples, self.name, self.current_epoch, self.val_counter, test=True)
         self.print("Done testing.")
 
 
@@ -665,12 +665,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             assert isinstance(num_nodes, torch.Tensor)
             n_nodes = num_nodes
         n_max = torch.max(n_nodes).item()
-        # Build the masks
+        
+        # Build the masks 哪些位置是真节点，哪些是 padding
         arange = torch.arange(n_max, device=self.device).unsqueeze(0).expand(batch_size, -1)
         node_mask = arange < n_nodes.unsqueeze(1)
+        node_mask_float = node_mask.float()
+        
         # Sample noise  -- z has size (n_samples, n_nodes, n_features)
         z_T = diffusion_utils.sample_discrete_feature_noise(limit_dist=self.limit_dist, node_mask=node_mask)
-        X, E, y = z_T.X, z_T.E, z_T.y
+        X_type, E, y = z_T.X, z_T.E, z_T.y  # X_type: [bs, n_max, 3]
+        
+        X_geom = torch.randn((batch_size, n_max, self.Xdim_output - X_type.shape[-1]), device=self.device) * node_mask_float.unsqueeze(-1)
+
+        X = torch.cat([X_type.float(), X_geom], dim=-1)
 
         assert (E == torch.transpose(E, 1, 2)).all()
         assert number_chain_steps < self.T
@@ -679,9 +686,17 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         chain_X = torch.zeros(chain_X_size)
         chain_E = torch.zeros(chain_E_size)
-
-        # Iteratively sample p(z_s | z_t) for t = 1, ..., T, with s = t - 1.
-        for s_int in reversed(range(0, self.T)):
+        
+        # Iteratively sample p(z_s | z_t) for t = 1, ..., T, with s = t - 1.  反向扩散主循环 从 T 到 0
+        # 构建 tqdm 迭代器
+        show_pbar = True
+        iter_range = range(0, self.T)
+        if show_pbar:
+            from tqdm import tqdm
+            iter_range = tqdm(iter_range, desc="Sampling reverse diffusion", leave=False)
+            
+            
+        for s_int in reversed(iter_range):
             s_array = s_int * torch.ones((batch_size, 1)).type_as(y)
             t_array = s_array + 1
             s_norm = s_array / self.T
@@ -697,15 +712,34 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             chain_E[write_index] = discrete_sampled_s.E[:keep_chain]
 
         # Sample
-        sampled_s = sampled_s.mask(node_mask, collapse=True)
+        # sampled_s = sampled_s.mask(node_mask, collapse=True)
         X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
-
-
+        
+        # x_mask = node_mask.unsqueeze(-1)          # bs, n, 1
+        # e_mask1 = x_mask.unsqueeze(2)             # bs, n, 1, 1
+        # e_mask2 = x_mask.unsqueeze(1)             # bs, 1, n, 1
+        
+        # X_type = torch.argmax(X[..., :3], dim=-1)
+        # X_geom = X[..., 3:]
+        # X = torch.cat([F.one_hot(X_type, num_classes=3).float(), X_geom], dim=-1)
+        # E = torch.argmax(E, dim=-1)
+    
+        # X[node_mask == 0] = - 1
+        # E[(e_mask1 * e_mask2).squeeze(-1) == 0] = - 1    
 
         # Prepare the chain for saving
         if keep_chain > 0:
-            final_X_chain = X[:keep_chain]
-            final_E_chain = E[:keep_chain]
+            x_mask = node_mask.unsqueeze(-1)          # bs, n, 1
+            e_mask1 = x_mask.unsqueeze(2)             # bs, n, 1, 1
+            e_mask2 = x_mask.unsqueeze(1)             # bs, 1, n, 1
+            final_X_chain = torch.argmax(X[..., :3], dim=-1)
+            final_E_chain = torch.argmax(E, dim=-1)
+
+            final_X_chain[node_mask == 0] = - 1
+            final_E_chain[(e_mask1 * e_mask2).squeeze(-1) == 0] = - 1                       
+            
+            final_X_chain = final_X_chain[:keep_chain]
+            final_E_chain = final_E_chain[:keep_chain]
 
             chain_X[0] = final_X_chain                  # Overwrite last frame with the resulting X, E
             chain_E[0] = final_E_chain
@@ -726,7 +760,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             molecule_list.append([atom_types, edge_types])
 
         # Visualize chains
-        if self.visualization_tools is not None:
+        # if self.visualization_tools is not None:
+        if False:
             self.print('Visualizing chains...')
             current_path = os.getcwd()
             num_molecules = chain_X.size(1)       # number of molecules
@@ -754,40 +789,78 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
     def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, node_mask):
         """Samples from zs ~ p(zs | zt). Only used during sampling.
            if last_step, return the graph prediction as well"""
-        bs, n, dxs = X_t.shape
+        bs, n, dx = X_t.shape
+        device = X_t.device
+
+        # ------------------------------------------------
+        # 0. 拆分 X_t = (类型, 几何)
+        # ------------------------------------------------
+        type_dim = 3
+        geom_dim = dx - type_dim
+
+        X_t_type = X_t[..., :type_dim]      # (bs, n, 3), one-hot
+        X_t_geom = X_t[..., type_dim:]      # (bs, n, 10)
+
+        # ------------------------------------------------
+        # 1. 取噪声调度参数：beta_t, alphā_s, alphā_t
+        # ------------------------------------------------        
         beta_t = self.noise_schedule(t_normalized=t)  # (bs, 1)
         alpha_s_bar = self.noise_schedule.get_alpha_bar(t_normalized=s)
         alpha_t_bar = self.noise_schedule.get_alpha_bar(t_normalized=t)
 
+        # 对应一步的 α_t = 1 - β_t
+        alpha_t_step = 1.0 - beta_t                                 # (bs, 1)
+
+        # ------------------------------------------------
+        # 2. 计算转移矩阵（离散部分用）
+        # ------------------------------------------------        
         # Retrieve transitions matrix
         Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, self.device)
         Qsb = self.transition_model.get_Qt_bar(alpha_s_bar, self.device)
         Qt = self.transition_model.get_Qt(beta_t, self.device)
 
+        # ------------------------------------------------
+        # 3. 网络预测（基于当前 z_t = (X_t, E_t, y_t)）
+        # ------------------------------------------------
         # Neural net predictions
         noisy_data = {'X_t': X_t, 'E_t': E_t, 'y_t': y_t, 't': t, 'node_mask': node_mask}
         extra_data = self.compute_extra_data(noisy_data)
         pred = self.forward(noisy_data, extra_data, node_mask)
 
         # Normalize predictions
-        pred_X = F.softmax(pred.X, dim=-1)               # bs, n, d0
+        # pred_X = F.softmax(pred.X, dim=-1)               # bs, n, d0
+        # 类型 logits -> 概率
+        pred_type_logits = pred.X[..., :type_dim]       # (bs, n, 3)
+        pred_type_probs = F.softmax(pred_type_logits, dim=-1)
+
+        # 几何部分预测（我们把它当作 x0 的预测）
+        pred_geom_x0 = pred.X[..., type_dim:]          # (bs, n, 10)        
+        
         pred_E = F.softmax(pred.E, dim=-1)               # bs, n, n, d0
 
-        p_s_and_t_given_0_X = diffusion_utils.compute_batched_over0_posterior_distribution(X_t=X_t,
+        # ------------------------------------------------
+        # 4. 离散部分 posterior：类型 + 边（完全沿用 DiGress）
+        # ------------------------------------------------
+        # 对类型：用 X_t_type 而不是整个 X_t
+        p_s_and_t_given_0_X = diffusion_utils.compute_batched_over0_posterior_distribution(X_t=X_t_type,
                                                                                            Qt=Qt.X,
                                                                                            Qsb=Qsb.X,
                                                                                            Qtb=Qtb.X)
 
+        # 对边：完全照旧
         p_s_and_t_given_0_E = diffusion_utils.compute_batched_over0_posterior_distribution(X_t=E_t,
                                                                                            Qt=Qt.E,
                                                                                            Qsb=Qsb.E,
                                                                                            Qtb=Qtb.E)
+        
+        # ------------ 节点类型 posterior ------------
         # Dim of these two tensors: bs, N, d0, d_t-1
-        weighted_X = pred_X.unsqueeze(-1) * p_s_and_t_given_0_X         # bs, n, d0, d_t-1
+        weighted_X = pred_type_probs.unsqueeze(-1) * p_s_and_t_given_0_X         # bs, n, d0, d_t-1
         unnormalized_prob_X = weighted_X.sum(dim=2)                     # bs, n, d_t-1
         unnormalized_prob_X[torch.sum(unnormalized_prob_X, dim=-1) == 0] = 1e-5
         prob_X = unnormalized_prob_X / torch.sum(unnormalized_prob_X, dim=-1, keepdim=True)  # bs, n, d_t-1
 
+        # ------------ 边 posterior ------------
         pred_E = pred_E.reshape((bs, -1, pred_E.shape[-1]))
         weighted_E = pred_E.unsqueeze(-1) * p_s_and_t_given_0_E        # bs, N, d0, d_t-1
         unnormalized_prob_E = weighted_E.sum(dim=-2)
@@ -798,18 +871,58 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         assert ((prob_X.sum(dim=-1) - 1).abs() < 1e-4).all()
         assert ((prob_E.sum(dim=-1) - 1).abs() < 1e-4).all()
 
-        sampled_s = diffusion_utils.sample_discrete_features(prob_X, prob_E, node_mask=node_mask)
-
-        X_s = F.one_hot(sampled_s.X, num_classes=self.Xdim_output).float()
+        # 从 posterior 采样离散类型 & 边
+        sampled_s = diffusion_utils.sample_discrete_features(prob_X, prob_E, node_mask=node_mask)      
+        # 类型 index：(bs, n)，范围 [0, x_classes-1]  one-hot 类型
+        X_s_type = F.one_hot(sampled_s.X, num_classes=type_dim).float()   # (bs, n, 3)
         E_s = F.one_hot(sampled_s.E, num_classes=self.Edim_output).float()
 
+        # ------------------------------------------------
+        # 5. 连续几何部分：DDPM posterior（Gaussian）
+        # ------------------------------------------------
+        # 按 x0-parameterization 公式：
+        # μ = c1 * x0_pred + c2 * x_t
+        # σ^2 = (1 - ᾱ_s)/(1 - ᾱ_t) * β_t
+
+        # reshape 方便广播
+        alpha_s_bar = alpha_s_bar.view(bs, 1, 1)     # (bs,1,1)
+        alpha_t_bar = alpha_t_bar.view(bs, 1, 1)     # (bs,1,1)
+        beta_t = beta_t.view(bs, 1, 1)               # (bs,1,1)
+        alpha_t_step = alpha_t_step.view(bs, 1, 1)   # (bs,1,1)
+
+        # 分母 1 - ᾱ_t
+        one_minus_alpha_t_bar = 1.0 - alpha_t_bar
+        one_minus_alpha_t_bar = torch.clamp(one_minus_alpha_t_bar, min=1e-8)
+
+        # 系数
+        # 参考 DDPM：c1 = sqrt(ᾱ_{t-1}) * β_t / (1 - ᾱ_t)
+        #           c2 = sqrt(α_t) * (1 - ᾱ_{t-1}) / (1 - ᾱ_t)
+        c1 = torch.sqrt(alpha_s_bar) * beta_t / one_minus_alpha_t_bar
+        c2 = torch.sqrt(alpha_t_step) * (1.0 - alpha_s_bar) / one_minus_alpha_t_bar
+
+        mu_geom = c1 * pred_geom_x0 + c2 * X_t_geom   # (bs, n, 10)
+
+        var_geom = (1.0 - alpha_s_bar) / one_minus_alpha_t_bar * beta_t
+        var_geom = torch.clamp(var_geom, min=1e-8)
+        sigma_geom = torch.sqrt(var_geom)             # (bs,1,1)
+
+        # 采样高斯噪声（只对真实节点，加 mask）
+        eps = torch.randn_like(X_t_geom) * node_mask.unsqueeze(-1).float()
+        X_s_geom = mu_geom + sigma_geom * eps         # (bs, n, 10)
+
+        # ------------------------------------------------
+        # 6. 拼回来：完整 X_s = [类型 one-hot, 几何连续]
+        # ------------------------------------------------
+        X_s = torch.cat([X_s_type, X_s_geom], dim=-1)   # (bs, n, 3+10)
+
+        # 保证对称
         assert (E_s == torch.transpose(E_s, 1, 2)).all()
-        assert (X_t.shape == X_s.shape) and (E_t.shape == E_s.shape)
+        # assert (X_t.shape == X_s.shape) and (E_t.shape == E_s.shape)
 
-        out_one_hot = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0))
-        out_discrete = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0))
+        out_one_hot = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0).to(device))
+        out_discrete = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0).to(device))
 
-        return out_one_hot.mask(node_mask).type_as(y_t), out_discrete.mask(node_mask, collapse=True).type_as(y_t)
+        return out_one_hot.mask(node_mask), out_discrete.mask(node_mask, collapse=True)
 
     def compute_extra_data(self, noisy_data):
         """ At every training step (after adding noise) and step in sampling, compute extra information and append to
