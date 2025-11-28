@@ -7,7 +7,7 @@ class BasicCADMetrics(object):
 
     def __init__(self, dataset_infos, train_graph_signatures=None):
         """
-        type_decoder = ['SPLINE','ARC','LINE']
+        type_decoder = ['LINE','ARC','CIRCLE']
         train_graph_signatures: set(), 用于 novelty 检查
         """
         self.type_decoder = dataset_infos.atom_decoder
@@ -28,9 +28,6 @@ class BasicCADMetrics(object):
         d1 = torch.norm(P1 - C)
         return (abs(d0 - r) < tol) and (abs(d1 - r) < tol)
 
-    def check_spline(self, P0, P1, tol=1e-5):
-        return torch.norm(P0 - P1) > tol   # 最基本要求：非零长度
-
     # ------------------------------------------------------------
     # Topology Checks: adjacency consistency
     # ------------------------------------------------------------
@@ -38,7 +35,7 @@ class BasicCADMetrics(object):
     def check_adjacency(self, X, edge_index, eps=2e-2):
         """
         在 PyG Data 图中检查拓扑一致性。
-        X: (n,13)
+        X: (n,12)
         edge_index: (2,m)
         """
         n = X.size(0)
@@ -69,10 +66,11 @@ class BasicCADMetrics(object):
         types = X[:, :3].argmax(dim=-1).cpu().numpy()
         P0 = X[:, 3:6].cpu().numpy()
         P1 = X[:, 6:9].cpu().numpy()
-        r = X[:, 12].cpu().numpy()
+        P2 = X[:, 9:12].cpu().numpy()
 
         # 用长度 + 类型 + 半径构建 signature
         lengths = np.linalg.norm(P1 - P0, axis=1)
+        r = np.linalg.norm(P0 - P2, axis=1)  # 对于 ARC，半径；对于其他类型，点到点距离作为“伪半径”
 
         sig = list(zip(types.tolist(), lengths.tolist(), r.tolist()))
         sig = sorted(sig)
@@ -96,14 +94,10 @@ class BasicCADMetrics(object):
                 if not self.check_line(P0, P1):
                     return False
 
-            elif t == 1:  # ARC
+            else:  # ARC / CIRCLE
                 C = X[i, 9:12]
-                r = X[i, 12].item()
+                r = np.linalg.norm(P0 - C, axis=1)
                 if not self.check_arc(P0, P1, C, r):
-                    return False
-
-            elif t == 2:  # SPLINE
-                if not self.check_spline(P0, P1):
                     return False
 
         return True

@@ -34,13 +34,13 @@ class AbstractDataModule(LightningDataset):
     def node_types(self):
         num_classes = None
         for data in self.train_dataloader():
-            num_classes = data.x.shape[1]
+            num_classes = data.x[..., :3].shape[1]
             break
 
         counts = torch.zeros(num_classes)
 
         for i, data in enumerate(self.train_dataloader()):
-            counts += data.x.sum(dim=0)
+            counts += data.x[..., :3].sum(dim=0)
 
         counts = counts / counts.sum()
         return counts
@@ -73,7 +73,7 @@ class AbstractDataModule(LightningDataset):
 
     def geom_statistics(self):
         """
-        统计 CAD 节点几何特征（最后 10 维）的全局 mean 和 std。
+        统计 CAD 节点几何特征（最后 9 维）的全局 mean 和 std。
         遍历 train 和 val dataloader，与 node_counts 风格一致。
         """
         geom_sum = None
@@ -82,8 +82,8 @@ class AbstractDataModule(LightningDataset):
 
         for loader in [self.train_dataloader(), self.val_dataloader()]:
             for data in loader:
-                # data.x: (num_nodes, 13), 3 one-hot + 10 geometry
-                geom = data.x[:, 3:]                # shape = (n, 10)
+                # data.x: (num_nodes, 13), 3 one-hot + 9 geometry
+                geom = data.x[:, 3:]                # shape = (n, 9)
                 n = geom.shape[0]
 
                 # 初始化累加器

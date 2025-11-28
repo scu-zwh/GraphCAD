@@ -153,12 +153,16 @@ class CADGraphDataModule(AbstractDataModule):
 class CADinfos(AbstractDatasetInfos):
     def __init__(self, datamodule, cfg, recompute_statistics=False, meta=None):
         self.name = 'cad'
-        self.atom_decoder = ['LINE', 'ARC', 'SPLINE']
+        self.atom_decoder = ['LINE', 'ARC', 'CIRCLE']
         self.atom_encoder = {t: i for i, t in enumerate(self.atom_decoder)}
         self.num_atom_types = 3
         
-        self.geom_mean = torch.tensor([0.0514, -0.0298, 0.0908, 0.0611, -0.0821, 0.1319, 0.0033, -0.0050, 0.0153, 0.0338])
-        self.geom_std = torch.tensor([0.4446, 0.3368, 0.3079, 0.4530, 0.3793, 0.3330, 0.1340, 0.1325, 0.1170, 0.1505])
+        # self.geom_mean, self.geom_mean = datamodule.geom_statistics()
+        # print(f"CAD 节点几何特征 mean: {self.geom_mean}")
+        # print(f"CAD 节点几何特征 std: {self.geom_std}")
+        
+        self.geom_mean = torch.tensor([0.0514, -0.0298, 0.0908, 0.0611, -0.0821, 0.1319, 0.0033, -0.0050, 0.0153])
+        self.geom_std = torch.tensor([0.4446, 0.3368, 0.3079, 0.4530, 0.3793, 0.3330, 0.1340, 0.1325, 0.1170])
 
         self.edge_density = torch.tensor(0.000459950853837654)
 
@@ -170,7 +174,10 @@ class CADinfos(AbstractDatasetInfos):
                                     0.0005, 0.0000, 0.0000, 0.0017])
         self.max_n_nodes = len(self.n_nodes) - 1
 
-        self.node_types = torch.tensor([0.8556, 0.1444, 0.0000])
+        self.node_types = datamodule.node_types()                                     # There are no node types
+        print("Distribution of node types", self.node_types)
+        self.node_types = torch.tensor([0.8556, 0.0583, 0.0861])
+        # self.node_types = torch.tensor([0.8556, 0.1444, 0.0000])
 
         # edge type 也通常只有 1 种（邻接）
         self.edge_types = torch.tensor([0.8263, 0.1737])

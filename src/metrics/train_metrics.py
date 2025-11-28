@@ -89,6 +89,7 @@ class TrainLossDiscrete(nn.Module):
         log : boolean. """
         bs, n, dx = true_X.size()
         device = true_X.device
+        geom_dim = dx - 3
 
         # -------------------------
         # 2. Split X into type + geom
@@ -126,8 +127,8 @@ class TrainLossDiscrete(nn.Module):
         # -------------------------
         # MSE loss for geom
         # -------------------------
-        pred_geom = pred_geom.reshape(-1, 10)[mask_X_type]
-        true_geom = true_geom.reshape(-1, 10)[mask_X_type]
+        pred_geom = pred_geom.reshape(-1, geom_dim)[mask_X_type]
+        true_geom = true_geom.reshape(-1, geom_dim)[mask_X_type]
 
         loss_geom = self.mse(pred_geom, true_geom)
 

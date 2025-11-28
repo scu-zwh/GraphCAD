@@ -1,6 +1,6 @@
 import graph_tool as gt
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '5'
 import pathlib
 import warnings
 
@@ -20,7 +20,6 @@ from diffusion_model_discrete import DiscreteDenoisingDiffusion
 from diffusion.extra_features import DummyExtraFeatures, ExtraFeatures
 
 warnings.filterwarnings("ignore", category=PossibleUserWarning)
-
 
 def get_resume(cfg, model_kwargs):
     """ Resumes a run. It loads previous config without allowing to update keys (used for testing). """

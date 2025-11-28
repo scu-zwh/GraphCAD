@@ -203,9 +203,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             samples_left_to_save = self.cfg.general.samples_to_save
             chains_left_to_save = self.cfg.general.chains_to_save
             
-            print("samples_left_to_generate:", samples_left_to_generate)
-            print("samples_left_to_save:", samples_left_to_save)
-            print("chains_left_to_save:", chains_left_to_save)
+            debug_path = "/mnt/data/zhengwenhao/workspace/DiGress/outputs/debug.txt"
+
+            with open(debug_path, "w", encoding="utf-8") as f:
+                f.write(f"samples_left_to_generate: {samples_left_to_generate}\n")
+                f.write(f"samples_left_to_save: {samples_left_to_save}\n")
+                f.write(f"chains_left_to_save: {chains_left_to_save}\n")
+
 
             samples = []
 
@@ -225,8 +229,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 samples_left_to_generate -= to_generate
                 chains_left_to_save -= chains_save
             self.print("Computing sampling metrics...")
-            self.sampling_metrics.forward(samples, self.name, self.current_epoch, val_counter=-1, test=False,
-                                          local_rank=self.local_rank)
+            self.sampling_metrics(samples, self.name, self.current_epoch, val_counter=-1, test=False)
             self.print(f'Done. Sampling took {time.time() - start:.2f} seconds\n')
             print("Validation epoch end ends...")
 

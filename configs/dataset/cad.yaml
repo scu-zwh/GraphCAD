@@ -1,5 +1,5 @@
 name: cad
-root_path: "/mnt/data/zhengwenhao/workspace/cad_graph/ProxBFN-main/data/deepcad/cad_graph"
+root_path: "/mnt/data/zhengwenhao/workspace/DiGress/data/deepcad/cad_graph1"  # /mnt/data/zhengwenhao/workspace/cad_graph/ProxBFN-main/data/deepcad/cad_graph  /mnt/data/zhengwenhao/workspace/DiGress/data/deepcad/cad_graph1
 train_list: "/mnt/data/zhengwenhao/workspace/cad_graph/ProxBFN-main/data/deepcad/train_all_graphs.txt"
 val_list: "/mnt/data/zhengwenhao/workspace/cad_graph/ProxBFN-main/data/deepcad/val_all_graphs.txt"
 test_list: "/mnt/data/zhengwenhao/workspace/cad_graph/ProxBFN-main/data/deepcad/test_all_graphs.txt"
