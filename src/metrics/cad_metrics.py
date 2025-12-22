@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 
 from analysis.cad_utils import compute_cad_metrics
+from analysis.spectre_utils import Comm20SamplingMetrics
 
 class NodeMetrics(MetricCollection):
     """
@@ -197,7 +198,7 @@ class HistogramMAE(Metric):
 #############################################
 
 class SamplingCADMetrics(nn.Module):
-    def __init__(self, dataset_infos, train_graph_signatures):
+    def __init__(self, datamodule, dataset_infos, train_graph_signatures):
         super().__init__()
         self.dataset_infos = dataset_infos
         self.train_graph_signatures = train_graph_signatures
@@ -225,6 +226,23 @@ class SamplingCADMetrics(nn.Module):
         edge_target = di.edge_density.float()
         self.register_buffer("target_edge_density", edge_target)
         self.edge_density_mae = HistogramMAE(edge_target)
+
+        # ⭐ 新增：COMM20 相关指标
+        self.comm20_metrics = Comm20SamplingMetrics(datamodule)
+        
+    def pyg_to_adj_list(self, pyg_graphs):
+        adj_list = []
+        for g in pyg_graphs:
+            n = g.x.size(0)
+            A = torch.zeros((n, n), dtype=torch.float32)
+
+            src, dst = g.edge_index
+            A[src, dst] = 1
+            A[dst, src] = 1  # 无向图
+
+            adj_list.append(A)
+        return adj_list
+
 
     #############################################
     #           Forward: compute all metrics
@@ -330,7 +348,31 @@ class SamplingCADMetrics(nn.Module):
         uniqueness = vun["uniqueness"]
         novelty    = vun["novelty"]
         cc_mean   = vun["connected_components"]['mean']
+        
+        
+        ############################################
+        # 6. Comm20 graph structure metrics
+        ############################################
+        # 将 CAD PyG 图转换为 adjacency matrices
+        adj_list = self.pyg_to_adj_list(generated_graphs)
 
+        # Comm20SamplingMetrics 接受的是:
+        #    [(node_types, edge_matrix), ...]
+        generated_formatted = []
+        for i, A in enumerate(adj_list):
+            x = generated_graphs[i].x
+            node_types = x[:, :3].argmax(dim=-1)  # node type id
+            generated_formatted.append((node_types, A))
+
+        # 运行 COMM20 metrics
+        comm20_results = self.comm20_metrics(
+            generated_formatted,
+            name=name,
+            current_epoch=current_epoch,
+            val_counter=val_counter,
+            local_rank=0,
+            test=test
+        )  
 
         #############################
         # Prepare output
@@ -345,6 +387,9 @@ class SamplingCADMetrics(nn.Module):
             "cad_metrics/uniqueness": uniqueness,
             "cad_metrics/novelty": novelty,
             "cad_metrics/cc_mean": cc_mean,
+            "cad_metrics/degree": comm20_results.get("degree", 0),
+            "cad_metrics/clustering": comm20_results.get("clustering", 0),
+            "cad_metrics/orbit": comm20_results.get("orbit", 0)   
         }
 
         print(f"[{name}][Epoch {current_epoch}] CAD Sampling Metrics at sample #{val_counter}:")

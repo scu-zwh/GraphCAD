@@ -3,7 +3,7 @@ conda activate digress
 python src/train.py
 
 git add .
-git commit "xxx"
+git commit -m "xxx"
 git push origin main
 
 

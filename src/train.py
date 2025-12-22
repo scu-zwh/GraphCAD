@@ -96,7 +96,7 @@ def main(cfg: DictConfig):
             train_metrics = TrainCADMetrics()
 
         # We do not evaluate novelty during training
-        sampling_metrics = SamplingCADMetrics(dataset_infos, train_graph_signatures)
+        sampling_metrics = SamplingCADMetrics(datamodule, dataset_infos, train_graph_signatures)
 
         model_kwargs = {'dataset_infos': dataset_infos, 'train_metrics': train_metrics,
                         'sampling_metrics': sampling_metrics, 'visualization_tools': visualization_tools,

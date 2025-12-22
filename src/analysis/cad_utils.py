@@ -96,7 +96,7 @@ class BasicCADMetrics(object):
 
             else:  # ARC / CIRCLE
                 C = X[i, 9:12]
-                r = np.linalg.norm(P0 - C, axis=1)
+                r = torch.norm(P0 - C)
                 if not self.check_arc(P0, P1, C, r):
                     return False
 

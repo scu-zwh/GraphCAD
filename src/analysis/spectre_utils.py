@@ -736,9 +736,9 @@ class SpectreSamplingMetrics(nn.Module):
     def __init__(self, datamodule, compute_emd, metrics_list):
         super().__init__()
 
-        self.train_graphs = self.loader_to_nx(datamodule.train_dataloader())
-        self.val_graphs = self.loader_to_nx(datamodule.val_dataloader())
-        self.test_graphs = self.loader_to_nx(datamodule.test_dataloader())
+        self.train_graphs = self.loader_to_nx(datamodule.train_dataloader())[:200]
+        self.val_graphs = self.loader_to_nx(datamodule.val_dataloader())[:200]
+        self.test_graphs = self.loader_to_nx(datamodule.test_dataloader())[:200]
         self.num_graphs_test = len(self.test_graphs)
         self.num_graphs_val = len(self.val_graphs)
         self.compute_emd = compute_emd
@@ -855,20 +855,20 @@ class SpectreSamplingMetrics(nn.Module):
             print("Sampling statistics", to_log)
         if wandb.run:
             wandb.log(to_log, commit=False)
+            
+        return {
+            "degree": degree if 'degree' in self.metrics_list else None,
+            "clustering": clustering if 'clustering' in self.metrics_list else None,
+            "orbit": orbit if 'orbit' in self.metrics_list else None,
+        }
 
     def reset(self):
         pass
 
-class CADSamplingMetrics(SpectreSamplingMetrics):
-    def __init__(self, datamodule):
-        super().__init__(datamodule=datamodule,
-                         compute_emd=True,
-                         metrics_list=['degree', 'clustering', 'orbit'])
-
 class Comm20SamplingMetrics(SpectreSamplingMetrics):
     def __init__(self, datamodule):
         super().__init__(datamodule=datamodule,
-                         compute_emd=True,
+                         compute_emd=False,
                          metrics_list=['degree', 'clustering', 'orbit'])
 
 

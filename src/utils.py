@@ -6,6 +6,127 @@ import torch
 import omegaconf
 import wandb
 
+# def node_render(X):
+#     """ Renders node features into CAD model. Assumes first 3 features are node types. """
+#     num_node_types = 3  # [LINE, ARC, CIRCLE]
+#     node_types = torch.argmax(X[..., :num_node_types], dim=-1)  # bs, n
+    
+#     # 根据 node_types， 绘制出相应的线段，然后从线段上均匀取100个点
+#     bs, n = node_types.shape
+#     X_rendered = torch.zeros((bs, n, 100, 3), device=X.device)  # 假设每个节点渲染成100个点
+#     for b in range(bs):
+#         for i in range(n):
+#             t = node_types[b, i].item()
+#             P0 = X[b, i, 3:6]
+#             P1 = X[b, i, 6:9]
+#             if t == 0:  # LINE
+#                 points = torch.linspace(0, 1, steps=100, device=X.device).unsqueeze(-1)  # (100, 1)
+#                 rendered_points = P0 + points * (P1 - P0)  # (100, 3)
+#             elif t == 1:  # ARC
+#                 C = X[b, i, 9:12]
+#                 r = torch.norm(P0 - C)
+#                 vec0 = P0 - C
+#                 vec1 = P1 - C
+#                 angle0 = torch.atan2(vec0[1], vec0[0])
+#                 angle1 = torch.atan2(vec1[1], vec1[0])
+#                 if angle1 < angle0:
+#                     angle1 += 2 * torch.pi
+#                 angles = torch.linspace(angle0, angle1, steps=100, device=X.device)
+#                 rendered_points = C + r * torch.stack((torch.cos(angles), torch.sin(angles), torch.zeros_like(angles)), dim=-1)
+#             else:  # CIRCLE
+#                 C = X[b, i, 9:12]
+#                 r = torch.norm(P0 - C)
+#                 angles = torch.linspace(0, 2 * torch.pi, steps=100, device=X.device)
+#                 rendered_points = C + r * torch.stack((torch.cos(angles), torch.sin(angles), torch.zeros_like(angles)), dim=-1)
+#             X_rendered[b, i] = rendered_points
+#     return X_rendered  # bs, n, 100, 3
+
+def node_render(X):
+    """
+    X: (bs, n, d)
+    first 3 dims = one-hot node type
+    P0 = X[..., 3:6]
+    P1 = X[..., 6:9]
+    C  = X[..., 9:12]
+    output: (bs, n, 100, 3)
+    """
+    device = X.device
+    bs, n, _ = X.shape
+    num_points = 100
+
+    # node type = [LINE, ARC, CIRCLE]
+    node_types = torch.argmax(X[..., :3], dim=-1)     # (bs, n)
+
+    # geometry
+    P0 = X[..., 3:6]          # (bs, n, 3)
+    P1 = X[..., 6:9]          # (bs, n, 3)
+    C  = X[..., 9:12]         # (bs, n, 3)
+
+    # output
+    X_render = torch.zeros((bs, n, num_points, 3), device=device)
+
+    # t for line interpolation
+    t = torch.linspace(0, 1, num_points, device=device)           # (100,)
+    t = t.view(1, 1, num_points, 1)                               # (1,1,100,1)
+
+    # =========================
+    # LINE
+    # =========================
+    mask_line = (node_types == 0).view(bs, n, 1, 1)               # (bs,n,1,1)
+    if mask_line.any():
+        P0e = P0.unsqueeze(2)                                     # (bs,n,1,3)
+        P1e = P1.unsqueeze(2)                                     # (bs,n,1,3)
+        line_points = P0e + t * (P1e - P0e)                       # (bs,n,100,3)
+        X_render = X_render.where(~mask_line, line_points)
+
+    # =========================
+    # ARC
+    # =========================
+    mask_arc = (node_types == 1).view(bs, n, 1, 1)
+    if mask_arc.any():
+        vec0 = P0 - C                                             # (bs,n,3)
+        vec1 = P1 - C
+        angle0 = torch.atan2(vec0[...,1], vec0[...,0])            # (bs,n)
+        angle1 = torch.atan2(vec1[...,1], vec1[...,0])
+        angle1 = angle1 + (angle1 < angle0) * (2 * torch.pi)
+
+        # expand to (bs, n, 100)
+        angles = angle0.unsqueeze(-1) + t.squeeze(-1) * (angle1 - angle0).unsqueeze(-1)
+
+        r = torch.norm(vec0, dim=-1).unsqueeze(-1).unsqueeze(-1)  # (bs,n,1,1)
+        Ce = C.unsqueeze(2)
+
+        arc_points = torch.cat([
+            (Ce[..., 0:1] + torch.cos(angles).unsqueeze(-1) * r),
+            (Ce[..., 1:2] + torch.sin(angles).unsqueeze(-1) * r),
+            Ce[..., 2:3].expand(bs, n, num_points, 1)
+        ], dim=-1)
+
+        X_render = X_render.where(~mask_arc, arc_points)
+
+    # =========================
+    # CIRCLE
+    # =========================
+    mask_circle = (node_types == 2).view(bs, n, 1, 1)
+    if mask_circle.any():
+        # angles must be (bs,n,100)
+        base_angles = torch.linspace(0, 2 * torch.pi, num_points, device=device)   # (100,)
+        base_angles = base_angles.view(1, 1, num_points).expand(bs, n, num_points)
+
+        r = torch.norm(P0 - C, dim=-1).unsqueeze(-1)          # (bs,n,1)
+        Ce = C.unsqueeze(2)                                    # (bs,n,1,3)
+
+        circle_points = torch.cat([
+            Ce[..., 0:1] + torch.cos(base_angles).unsqueeze(-1) * r.unsqueeze(-1),
+            Ce[..., 1:2] + torch.sin(base_angles).unsqueeze(-1) * r.unsqueeze(-1),
+            Ce[..., 2:3].expand(bs, n, num_points, 1)
+        ], dim=-1)
+
+        X_render = X_render.where(~mask_circle, circle_points)
+
+    return X_render
+
+
 
 def create_folders(args):
     try:

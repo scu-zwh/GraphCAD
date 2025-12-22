@@ -14,6 +14,43 @@ from metrics.train_metrics import TrainLossDiscrete
 from metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
 from src import utils
 
+class CNNEncoder(nn.Module):
+    def __init__(self, output_dim):
+        super(CNNEncoder, self).__init__()
+
+        # 输入: (bs*n, 100, 3)  → reshape → (bs*n, 3, 100)
+        self.conv1 = nn.Conv1d(3, 32, kernel_size=5, padding=2)
+        self.conv2 = nn.Conv1d(32, 64, kernel_size=5, padding=2)
+        self.conv3 = nn.Conv1d(64, 128, kernel_size=5, padding=2)
+
+        self.fc = nn.Linear(128, output_dim)
+
+    def forward(self, x):
+        """
+        x: [bs, n, 100, 3]
+        return: [bs, n, output_dim]
+        """
+        bs, n, point_num, _ = x.shape
+
+        # Reshape for CNN
+        x = x.view(bs * n, point_num, 3)      # (bs*n, 100, 3)
+        x = x.permute(0, 2, 1)                # (bs*n, 3, 100)
+
+        # Conv1D blocks
+        x = F.relu(self.conv1(x))             # (bs*n, 32, 100)
+        x = F.relu(self.conv2(x))             # (bs*n, 64, 100)
+        x = F.relu(self.conv3(x))             # (bs*n, 128, 100)
+
+        # Global max pooling over points
+        x = torch.max(x, dim=-1)[0]           # (bs*n, 128)
+
+        # FC to output_dim
+        x = self.fc(x)                        # (bs*n, output_dim)
+
+        # reshape back to (bs, n, output_dim)
+        x = x.view(bs, n, -1)
+        return x
+
 
 class DiscreteDenoisingDiffusion(pl.LightningModule):
     def __init__(self, cfg, dataset_infos, train_metrics, sampling_metrics, visualization_tools, extra_features,
@@ -60,6 +97,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.extra_features = extra_features
         self.domain_features = domain_features
 
+        self.point_encoder = CNNEncoder(output_dim=64)  # 11.27 zwh change
         self.model = GraphTransformer(n_layers=cfg.model.n_layers,
                                       input_dims=input_dims,
                                       hidden_mlp_dims=cfg.model.hidden_mlp_dims,
@@ -643,7 +681,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         return nll
 
     def forward(self, noisy_data, extra_data, node_mask):
-        X = torch.cat((noisy_data['X_t'], extra_data.X), dim=2).float()
+        # 11.27 zwh change
+        # 先将noisy_data render，然后随机取100个点
+        from src.utils import node_render
+        
+        X_render = node_render(noisy_data['X_t'])   # bs, n, 100, 3
+        X_encoding = self.point_encoder(X_render)  # bs, n, 64
+        # print(X_encoding.shape)
+        
+        X = torch.cat((noisy_data['X_t'], X_encoding, extra_data.X), dim=2).float()
         E = torch.cat((noisy_data['E_t'], extra_data.E), dim=3).float()
         y = torch.hstack((noisy_data['y_t'], extra_data.y)).float()
         return self.model(X, E, y, node_mask)
