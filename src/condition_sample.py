@@ -10,12 +10,11 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 import graph_tool as gt
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import pathlib
 import warnings
 
+from tqdm import tqdm
 import torch
 torch.cuda.empty_cache()
 import hydra
@@ -154,36 +153,21 @@ def main(cfg: DictConfig):
         print("[WARNING]: Run is called 'debug' -- it will run with fast_dev_run. ")
 
     use_gpu = cfg.general.gpus > 0 and torch.cuda.is_available()
-    trainer = Trainer(gradient_clip_val=cfg.train.clip_grad,
-                      strategy="ddp_find_unused_parameters_true",  # Needed to load old checkpoints
-                      accelerator='gpu' if use_gpu else 'cpu',
-                      devices=cfg.general.gpus if use_gpu else 1,
-                      max_epochs=cfg.train.n_epochs,
-                      check_val_every_n_epoch=cfg.general.check_val_every_n_epochs,
-                      fast_dev_run=cfg.general.name == 'debug',
-                      enable_progress_bar=True,
-                      callbacks=callbacks,
-                      log_every_n_steps=50 if name != 'debug' else 1,
-                      logger=[])
 
-    if not cfg.general.test_only:
-        trainer.fit(model, datamodule=datamodule, ckpt_path=cfg.general.resume)
-        if cfg.general.name not in ['debug', 'test']:
-            trainer.test(model, datamodule=datamodule)
-    else:
-        # Start by evaluating test_only_path
-        trainer.test(model, datamodule=datamodule, ckpt_path=cfg.general.test_only)
-        if cfg.general.evaluate_all_checkpoints:
-            directory = pathlib.Path(cfg.general.test_only).parents[0]
-            print("Directory:", directory)
-            files_list = os.listdir(directory)
-            for file in files_list:
-                if '.ckpt' in file:
-                    ckpt_path = os.path.join(directory, file)
-                    if ckpt_path == cfg.general.test_only:
-                        continue
-                    print("Loading checkpoint", ckpt_path)
-                    trainer.test(model, datamodule=datamodule, ckpt_path=ckpt_path)
+    test_dataloader = datamodule.test_dataloader() 
+    print("Starting testing...")
+    
+    samples = []
+    ident = 0
+    for step, batch in tqdm(enumerate(test_dataloader)):
+        to_generate = batch.y.size(0)
+        samples.extend(model.sample_batch(batch_id=ident, batch_size=to_generate, num_nodes=None,
+                                    save_final=20,
+                                    keep_chain=10,
+                                    number_chain_steps=50,
+                                    y=batch.y, cad_vec=batch.cad_vec))
+        ident += to_generate
+
 
 
 if __name__ == '__main__':

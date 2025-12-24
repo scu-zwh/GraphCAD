@@ -290,29 +290,30 @@ class SamplingCADMetrics(nn.Module):
         # ============================================================
         # 【新增功能】保存生成的图为 .pt 文件
         # ============================================================
-        import os
-        save_dir = "/mnt/data/zhengwenhao/workspace/DiGress/outputs/generate/uncondition"
-        
-        # 1. 确保目录存在，不存在则创建
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir, exist_ok=True)
-            print(f"Created directory: {save_dir}")
+        if test:
+            import os
+            save_dir = "/mnt/data/zhengwenhao/workspace/DiGress/outputs/generate/condition"
+            
+            # 1. 确保目录存在，不存在则创建
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir, exist_ok=True)
+                print(f"Created directory: {save_dir}")
 
-        # 2. 保存文件
-        # 使用 val_counter 作为批次前缀 (例如 000000)，用 i 作为图内索引
-        # 格式示例: 000005-0012.pt (第5次验证的第12张图)
-        batch_prefix = f"{val_counter:06d}"
-        
-        print(f"Saving {len(generated_graphs)} graphs to {save_dir}...")
-        
-        for i, data in enumerate(generated_graphs):
-            filename = f"{i:06d}.pt"
-            save_path = os.path.join(save_dir, filename)
+            # 2. 保存文件
+            # 使用 val_counter 作为批次前缀 (例如 000000)，用 i 作为图内索引
+            # 格式示例: 000005-0012.pt (第5次验证的第12张图)
+            batch_prefix = f"{val_counter:06d}"
             
-            # 将数据保存到 CPU 上的文件中，避免占用显存
-            torch.save(data.cpu(), save_path)
+            print(f"Saving {len(generated_graphs)} graphs to {save_dir}...")
             
-        print("Save complete.")
+            for i, data in enumerate(generated_graphs):
+                filename = f"{i:06d}.pt"
+                save_path = os.path.join(save_dir, filename)
+                
+                # 将数据保存到 CPU 上的文件中，避免占用显存
+                torch.save(data.cpu(), save_path)
+                
+            print("Save complete.")
         # ============================================================        
 
 

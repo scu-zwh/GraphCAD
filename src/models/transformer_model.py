@@ -219,7 +219,7 @@ class GraphTransformer(nn.Module):
     dims : dict -- contains dimensions for each feature type
     """
     def __init__(self, n_layers: int, input_dims: dict, hidden_mlp_dims: dict, hidden_dims: dict,
-                 output_dims: dict, act_fn_in: nn.ReLU(), act_fn_out: nn.ReLU()):
+                 output_dims: dict, act_fn_in: nn.ReLU, act_fn_out: nn.ReLU):
         super().__init__()
         self.n_layers = n_layers
         self.out_dim_X = output_dims['X']
@@ -252,7 +252,7 @@ class GraphTransformer(nn.Module):
         self.mlp_out_y = nn.Sequential(nn.Linear(hidden_dims['dy'], hidden_mlp_dims['y']), act_fn_out,
                                        nn.Linear(hidden_mlp_dims['y'], output_dims['y']))
 
-    def forward(self, X, E, y, node_mask):
+    def forward(self, X, E, y, node_mask, cad_vec):
         bs, n = X.shape[0], X.shape[1]  # X: (512, 9, 12)
 
         diag_mask = torch.eye(n)
@@ -281,4 +281,4 @@ class GraphTransformer(nn.Module):
 
         E = 1/2 * (E + torch.transpose(E, 1, 2))
 
-        return utils.PlaceHolder(X=X, E=E, y=y).mask(node_mask)
+        return utils.PlaceHolder(X=X, E=E, y=y, cad_vec=cad_vec).mask(node_mask)

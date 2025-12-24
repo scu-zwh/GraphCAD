@@ -1,15 +1,15 @@
 # General settings
-name: 'Ours'      # Warning: 'debug' and 'test' are reserved name that have a special behavior
+name: 'Ours-condition'      # Warning: 'debug' and 'test' are reserved name that have a special behavior
 
 wandb: 'offline'             # online | offline | disabled
 gpus: 1                     # Multi-gpu is not implemented on this branch
 
 
 resume: null            # If resume, path to ckpt file from outputs directory in main directory
-test_only: '/mnt/data/zhengwenhao/workspace/DiGress/outputs/2025-12-09/Ours/checkpoints/DiGress_CAD_render1/last-v1.ckpt'         # Use absolute path
+test_only: null         # Use absolute path
 
-check_val_every_n_epochs: 5  # 5
-sample_every_val: 4  # 4
+check_val_every_n_epochs: 1  # 5
+sample_every_val: 1  # 4
 val_check_interval: null
 samples_to_generate: 256       # We advise to set it to 2 x batch_size maximum
 samples_to_save: 20

@@ -151,9 +151,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         
         # noisy_data = self.apply_noise(X, E, data.y, node_mask)
         extra_data = self.compute_extra_data(noisy_data)
-        pred = self.forward(noisy_data, extra_data, node_mask)
+        pred = self.forward(noisy_data, extra_data, node_mask, data.cad_vec)
         loss = self.train_loss(masked_pred_X=pred.X, masked_pred_E=pred.E, pred_y=pred.y,
-                               true_X=X, true_E=E, true_y=data.y,
+                               true_X=X, true_E=E, true_y=pred.y,
                                log=i % self.log_every_steps == 0)
 
         self.train_metrics(pred_X=pred.X, pred_E=pred.E, true_X=X, true_E=E, node_mask=node_mask,
@@ -209,8 +209,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         
         # noisy_data = self.apply_noise(X, E, data.y, node_mask)
         extra_data = self.compute_extra_data(noisy_data)
-        pred = self.forward(noisy_data, extra_data, node_mask)
-        nll = self.compute_val_loss(pred, noisy_data, dense_data.X, dense_data.E, data.y,  node_mask, test=False)
+        pred = self.forward(noisy_data, extra_data, node_mask, data.cad_vec)
+        nll = self.compute_val_loss(pred, noisy_data, dense_data.X, dense_data.E, data.y, node_mask, test=False)
         return {'loss': nll}
 
     def on_validation_epoch_end(self) -> None:
@@ -260,7 +260,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 samples.extend(self.sample_batch(batch_id=ident, batch_size=to_generate, num_nodes=None,
                                                  save_final=to_save,
                                                  keep_chain=chains_save,
-                                                 number_chain_steps=self.number_chain_steps))
+                                                 number_chain_steps=self.number_chain_steps,
+                                                 y=torch.zeros([to_generate, 6], dtype=torch.float32), cad_vec=None))
                 ident += to_generate
 
                 samples_left_to_save -= to_save
@@ -290,7 +291,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         noisy_data = self.apply_noise(normalized_data.X, normalized_data.E, normalized_data.y, node_mask)
         # noisy_data = self.apply_noise(dense_data.X, dense_data.E, data.y, node_mask)
         extra_data = self.compute_extra_data(noisy_data)
-        pred = self.forward(noisy_data, extra_data, node_mask)
+        pred = self.forward(noisy_data, extra_data, node_mask, data.cad_vec)
         nll = self.compute_val_loss(pred, noisy_data, dense_data.X, dense_data.E, data.y, node_mask, test=True)
         return {'loss': nll}
 
@@ -445,7 +446,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         # pred_probs_X = F.softmax(pred.X, dim=-1)
         pred_probs_X_type = F.softmax(pred.X[..., :3], dim=-1)
         pred_probs_E = F.softmax(pred.E, dim=-1)
-        pred_probs_y = F.softmax(pred.y, dim=-1)
+        # pred_probs_y = F.softmax(pred.y, dim=-1)
 
         Qtb = self.transition_model.get_Qt_bar(noisy_data['alpha_t_bar'], self.device)
         Qsb = self.transition_model.get_Qt_bar(noisy_data['alpha_s_bar'], self.device)
@@ -458,7 +459,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                                                             y_t=noisy_data['y_t'], Qt=Qt, Qsb=Qsb, Qtb=Qtb,
                                                             noisy_data=noisy_data)
         prob_true.E = prob_true.E.reshape((bs, n, n, -1))
-        prob_pred = diffusion_utils.posterior_distributions(X=pred_probs_X_type, E=pred_probs_E, y=pred_probs_y,
+        prob_pred = diffusion_utils.posterior_distributions(X=pred_probs_X_type, E=pred_probs_E, y=y,
                                                             X_t=noisy_data['X_t'][..., :3], E_t=noisy_data['E_t'],
                                                             y_t=noisy_data['y_t'], Qt=Qt, Qsb=Qsb, Qtb=Qtb,
                                                             noisy_data=noisy_data)
@@ -474,7 +475,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         kl_e = (self.test_E_kl if test else self.val_E_kl)(prob_true.E, torch.log(prob_pred.E))
         return self.T * (kl_x + kl_e)
 
-    def reconstruction_logp(self, t, X, E, node_mask):
+    def reconstruction_logp(self, t, X, E, node_mask, cad_vec=None):
         bs, n, dx = X.shape
         device = X.device
 
@@ -523,7 +524,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         noisy_data = {'X_t': sampled_0.X, 'E_t': sampled_0.E, 'y_t': sampled_0.y, 'node_mask': node_mask,
                       't': torch.zeros(X0.shape[0], 1).type_as(y0)}
         extra_data = self.compute_extra_data(noisy_data)       
-        pred0 = self.forward(noisy_data, extra_data, node_mask)
+        pred0 = self.forward(noisy_data, extra_data, node_mask, cad_vec=cad_vec)
 
         # ------------------------------
         # 4. Normalize predictions
@@ -538,7 +539,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         
         # probX0 = F.softmax(pred0.X, dim=-1)
         probE0 = F.softmax(pred0.E, dim=-1)
-        proby0 = F.softmax(pred0.y, dim=-1)
+        # proby0 = F.softmax(pred0.y, dim=-1)
 
         # ------------------------------
         # 5. Mask 掉 padding 部分
@@ -551,7 +552,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         diag_mask = diag_mask.unsqueeze(0).expand(probE0.size(0), -1, -1)
         probE0[diag_mask] = torch.ones(self.Edim_output).type_as(probE0)
 
-        return utils.PlaceHolder(X=probX0, E=probE0, y=proby0)
+        return utils.PlaceHolder(X=probX0, E=probE0, y=pred0.y)
 
     def apply_noise(self, X, E, y, node_mask):
         """
@@ -680,7 +681,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                        'batch_test_nll' if test else 'val_nll': nll}, commit=False)
         return nll
 
-    def forward(self, noisy_data, extra_data, node_mask):
+    def forward(self, noisy_data, extra_data, node_mask, cad_vec):
         # 11.27 zwh change
         # 先将noisy_data render，然后随机取100个点
         from src.utils import node_render
@@ -689,14 +690,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         X_encoding = self.point_encoder(X_render)  # bs, n, 64
         # print(X_encoding.shape)
         
+        assert noisy_data['y_t'].shape[-1] == 6
         X = torch.cat((noisy_data['X_t'], X_encoding, extra_data.X), dim=2).float()
         E = torch.cat((noisy_data['E_t'], extra_data.E), dim=3).float()
         y = torch.hstack((noisy_data['y_t'], extra_data.y)).float()
-        return self.model(X, E, y, node_mask)
+        return self.model(X, E, y, node_mask, cad_vec)
 
     @torch.no_grad()
     def sample_batch(self, batch_id: int, batch_size: int, keep_chain: int, number_chain_steps: int,
-                     save_final: int, num_nodes=None):
+                     save_final: int, num_nodes=None, y=None, cad_vec=None) -> list:
         """
         :param batch_id: int
         :param batch_size: int
@@ -722,7 +724,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         
         # Sample noise  -- z has size (n_samples, n_nodes, n_features)
         z_T = diffusion_utils.sample_discrete_feature_noise(limit_dist=self.limit_dist, node_mask=node_mask)
-        X_type, E, y = z_T.X, z_T.E, z_T.y  # X_type: [bs, n_max, 3]
+        
+        #
+        if y is None:
+            X_type, E, y = z_T.X, z_T.E, z_T.y  # X_type: [bs, n_max, 3]
+        else:
+            X_type = z_T.X
+            E = z_T.E
+            y = y.to(self.device)
         
         X_geom = torch.randn((batch_size, n_max, self.Xdim_output - X_type.shape[-1]), device=self.device) * node_mask_float.unsqueeze(-1)
 
@@ -752,8 +761,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             t_norm = t_array / self.T
 
             # Sample z_s
-            sampled_s, discrete_sampled_s = self.sample_p_zs_given_zt(s_norm, t_norm, X, E, y, node_mask)
-            X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
+            sampled_s, discrete_sampled_s = self.sample_p_zs_given_zt(s_norm, t_norm, X, E, y, node_mask, cad_vec=cad_vec)
+            X, E, y = sampled_s.X, sampled_s.E, y
 
             # Save the first keep_chain graphs
             write_index = (s_int * number_chain_steps) // self.T
@@ -765,7 +774,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         # X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
         
         # =================== 【新增：逆归一化代码】 ===================
-        unnor_sampled = utils.unnormalize(sampled_s.X, sampled_s.E, sampled_s.y, [1,1,1], [0,0,0], node_mask, collapse=False, dataset_info=self.dataset_info)
+        unnor_sampled = utils.unnormalize(sampled_s.X, sampled_s.E, y, [1,1,1], [0,0,0], node_mask, collapse=False, dataset_info=self.dataset_info)
         
         X, E, y = unnor_sampled.X, unnor_sampled.E, unnor_sampled.y
         # =============================================================        
@@ -842,7 +851,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         return molecule_list
 
-    def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, node_mask):
+    def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, node_mask, cad_vec=None):
         """Samples from zs ~ p(zs | zt). Only used during sampling.
            if last_step, return the graph prediction as well"""
         bs, n, dx = X_t.shape
@@ -881,7 +890,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         # Neural net predictions
         noisy_data = {'X_t': X_t, 'E_t': E_t, 'y_t': y_t, 't': t, 'node_mask': node_mask}
         extra_data = self.compute_extra_data(noisy_data)
-        pred = self.forward(noisy_data, extra_data, node_mask)
+        pred = self.forward(noisy_data, extra_data, node_mask, cad_vec=cad_vec)
 
         # Normalize predictions
         # pred_X = F.softmax(pred.X, dim=-1)               # bs, n, d0
@@ -975,8 +984,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         assert (E_s == torch.transpose(E_s, 1, 2)).all()
         # assert (X_t.shape == X_s.shape) and (E_t.shape == E_s.shape)
 
-        out_one_hot = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0).to(device))
-        out_discrete = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0).to(device))
+        out_one_hot = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0).to(device), cad_vec=cad_vec)
+        out_discrete = utils.PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0).to(device), cad_vec=cad_vec)
 
         return out_one_hot.mask(node_mask), out_discrete.mask(node_mask, collapse=True)
 

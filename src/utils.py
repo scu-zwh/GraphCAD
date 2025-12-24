@@ -235,10 +235,11 @@ def update_config_with_new_keys(cfg, saved_cfg):
 
 
 class PlaceHolder:
-    def __init__(self, X, E, y):
+    def __init__(self, X, E, y, cad_vec=None):
         self.X = X
         self.E = E
         self.y = y
+        self.cad_vec = cad_vec
 
     def type_as(self, x: torch.Tensor):
         """ Changes the device and dtype of X, E, y. """
