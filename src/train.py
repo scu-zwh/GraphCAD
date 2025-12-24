@@ -1,6 +1,16 @@
-import graph_tool as gt
+import sys
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '5'
+
+# 获取当前脚本的上一级目录 (即 GraphCAD 项目根目录)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+
+# 把项目根目录加到 sys.path 的最前面
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+import graph_tool as gt
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import pathlib
 import warnings
 

@@ -1,12 +1,12 @@
 # General settings
-name: 'DiGress_CAD_render1'      # Warning: 'debug' and 'test' are reserved name that have a special behavior
+name: 'Ours'      # Warning: 'debug' and 'test' are reserved name that have a special behavior
 
-wandb: 'online'             # online | offline | disabled
+wandb: 'offline'             # online | offline | disabled
 gpus: 1                     # Multi-gpu is not implemented on this branch
 
 
 resume: null            # If resume, path to ckpt file from outputs directory in main directory
-test_only: null         # Use absolute path
+test_only: '/mnt/data/zhengwenhao/workspace/DiGress/outputs/2025-12-09/Ours/checkpoints/DiGress_CAD_render1/last-v1.ckpt'         # Use absolute path
 
 check_val_every_n_epochs: 5  # 5
 sample_every_val: 4  # 4

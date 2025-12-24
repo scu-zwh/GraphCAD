@@ -762,7 +762,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         # Sample
         # sampled_s = sampled_s.mask(node_mask, collapse=True)
-        X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
+        # X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
+        
+        # =================== 【新增：逆归一化代码】 ===================
+        unnor_sampled = utils.unnormalize(sampled_s.X, sampled_s.E, sampled_s.y, [1,1,1], [0,0,0], node_mask, collapse=False, dataset_info=self.dataset_info)
+        
+        X, E, y = unnor_sampled.X, unnor_sampled.E, unnor_sampled.y
+        # =============================================================        
+        
         
         # x_mask = node_mask.unsqueeze(-1)          # bs, n, 1
         # e_mask1 = x_mask.unsqueeze(2)             # bs, n, 1, 1
